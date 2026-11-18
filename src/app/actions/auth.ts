@@ -55,6 +55,56 @@ function getAuthErrorMessage(error: { message: string }) {
   return "We couldn't complete that request. Please try again.";
 }
 
+// Temporary auth diagnostics; remove after the production failure is identified.
+type AuthDiagnosticError = {
+  name: string;
+  status?: number;
+  code?: string;
+  message: string;
+};
+
+function sanitizeAuthDiagnosticMessage(message: string, credentials: string[]) {
+  let sanitized = message.replace(/[\r\n\t]+/g, " ");
+
+  for (const credential of credentials) {
+    if (credential) {
+      sanitized = sanitized.split(credential).join("[redacted]");
+    }
+  }
+
+  return sanitized
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]")
+    .replace(/\b(?:bearer|basic)\s+[^\s,;]+/gi, "[redacted-authorization]")
+    .replace(/\b(?:access|refresh)[_-]?token\s*[:=]\s*[^,\r\n;]+/gi, "[redacted-token]")
+    .replace(
+      /\b(?:password|passwd|secret|api[_-]?key|authorization|cookie|email)\s*[:=]\s*[^,\r\n;]+/gi,
+      "[redacted-field]",
+    )
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted-token]")
+    .replace(/\bsb_(?:publishable|secret)_[A-Za-z0-9_-]+\b/gi, "[redacted-key]")
+    .replace(/https?:\/\/[^\s"'<>]+/gi, "[redacted-url]")
+    .slice(0, 240);
+}
+
+function logAuthDiagnostic(
+  operation: "login" | "signup",
+  error: AuthDiagnosticError,
+  credentials: string[],
+) {
+  console.error("[IRONMAN_AUTH_DIAGNOSTIC]", {
+    operation,
+    errorName: sanitizeAuthDiagnosticMessage(error.name, credentials).slice(0, 64),
+    httpStatus:
+      typeof error.status === "number" && Number.isFinite(error.status)
+        ? error.status
+        : null,
+    errorCode: error.code
+      ? sanitizeAuthDiagnosticMessage(error.code, credentials).slice(0, 64)
+      : null,
+    message: sanitizeAuthDiagnosticMessage(error.message, credentials),
+  });
+}
+
 function errorState(message: string): AuthActionState {
   return { status: "error", message };
 }
@@ -78,6 +128,7 @@ export async function signInAction(
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
+    logAuthDiagnostic("login", error, [email, password]);
     return errorState(getAuthErrorMessage(error));
   }
 
@@ -119,6 +170,7 @@ export async function signUpAction(
   });
 
   if (error) {
+    logAuthDiagnostic("signup", error, [email, password]);
     return errorState(getAuthErrorMessage(error));
   }
 

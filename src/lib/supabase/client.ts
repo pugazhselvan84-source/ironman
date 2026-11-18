@@ -6,4 +6,8 @@ import type { Database } from "@/lib/supabase/database.types";
 
 const { url, publishableKey } = getSupabasePublicConfig();
 
-export const supabase = createBrowserClient<Database>(url, publishableKey);
+export const supabase = createBrowserClient<Database>(url, publishableKey, {
+  cookieOptions: {
+    secure: process.env.NODE_ENV === "production",
+  },
+});
